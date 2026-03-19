@@ -238,6 +238,15 @@ useEffect(()=>{
     const c2=localStorage.getItem(LS_KEYS.ct);if(c2)sCt(JSON.parse(c2));
     const s=localStorage.getItem(LS_KEYS.sl);if(s)sSl(JSON.parse(s));
   }catch(e){console.log("load err",e)}
+  // Auto-fix: remove any overlap between likes and dislikes (likes win)
+  try{
+    const l2=JSON.parse(localStorage.getItem(LS_KEYS.lk)||"[]");
+    const d2=JSON.parse(localStorage.getItem(LS_KEYS.dk)||"[]");
+    if(l2.length>0&&d2.length>0){
+      const cleaned=d2.filter(x=>!l2.includes(x));
+      if(cleaned.length!==d2.length){sDk(cleaned);try{localStorage.setItem(LS_KEYS.dk,JSON.stringify(cleaned));}catch(e){}}
+    }
+  }catch(e){}
 },[]);
 
 // Real-time Firestore listener - runs when authUser changes
@@ -829,8 +838,8 @@ if(pg==="editlocs") return (<Sh pg={pg} sp={sPg}><button onClick={()=>sPg("home"
 
 // === SETTINGS ===
 if(pg==="settings"){const av=CT.filter(c=>!lk.includes(c.k));return (<Sh pg={pg} sp={sPg}><div style={{fontSize:20,fontWeight:900,marginTop:16,marginBottom:16}}>設定</div><div style={{display:"flex",background:"rgba(255,255,255,0.06)",borderRadius:12,padding:3,marginBottom:16}}>{["likes","dislikes","cal"].map(t=> <button key={t} onClick={()=>sStb(t)} style={{flex:1,padding:"8px 0",fontSize:13,fontWeight:stb===t?700:400,borderRadius:10,border:"none",background:stb===t?ac:"transparent",color:stb===t?"#fff":ts,cursor:"pointer",fontFamily:"'Noto Sans TC',sans-serif"}}>{{likes:"喜歡",dislikes:"不吃",cal:"熱量"}[t]}</button>)}</div>
-{stb==="likes"&& <div><div style={{fontSize:13,color:ts,marginBottom:12}}>喜歡的料理(最多5) - 推薦時優先</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>{CT.map(t2=>{const a=lk.includes(t2.k);return (<button key={t2.k} onClick={()=>{if(a)sLk(p=>p.filter(x=>x!==t2.k));else if(lk.length<5)sLk(p=>[...p,t2.k]);}} style={{...crd,cursor:lk.length>=5&&!a?"not-allowed":"pointer",opacity:lk.length>=5&&!a?0.4:1,textAlign:"center",padding:12,border:a?"2px solid "+ac:"1px solid "+cb,background:a?"rgba(139,92,246,0.15)":cd}}><div style={{fontSize:14,fontWeight:700}}>{t2.l}</div></button>);})}</div></div>}
-{stb==="dislikes"&& <div><div style={{fontSize:13,color:ts,marginBottom:4}}>不吃的料理(最多5) - 完全排除</div><div style={{fontSize:11,color:"rgba(200,180,230,0.5)",marginBottom:12}}>設定後，選餐頁面將不會顯示這些類型</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>{av.map(t2=>{const a=dk.includes(t2.k);return (<button key={t2.k} onClick={()=>{if(a)sDk(p=>p.filter(x=>x!==t2.k));else if(dk.length<5)sDk(p=>[...p,t2.k]);}} style={{...crd,cursor:dk.length>=5&&!a?"not-allowed":"pointer",opacity:dk.length>=5&&!a?0.4:1,textAlign:"center",padding:12,border:a?"2px solid "+dg:"1px solid "+cb,background:a?"rgba(239,68,68,0.1)":cd}}><div style={{fontSize:14,fontWeight:700}}>{t2.l}</div></button>);})}</div></div>}
+{stb==="likes"&& <div><div style={{fontSize:13,color:ts,marginBottom:12}}>喜歡的料理(最多5) - 推薦時優先</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>{CT.map(t2=>{const a=lk.includes(t2.k);return (<button key={t2.k} onClick={()=>{if(a)sLk(p=>p.filter(x=>x!==t2.k));else if(lk.length<5){sLk(p=>[...p,t2.k]);sDk(p=>p.filter(x=>x!==t2.k));}}} style={{...crd,cursor:lk.length>=5&&!a?"not-allowed":"pointer",opacity:lk.length>=5&&!a?0.4:1,textAlign:"center",padding:12,border:a?"2px solid "+ac:"1px solid "+cb,background:a?"rgba(139,92,246,0.15)":cd}}><div style={{fontSize:14,fontWeight:700}}>{t2.l}</div></button>);})}</div></div>}
+{stb==="dislikes"&& <div><div style={{fontSize:13,color:ts,marginBottom:4}}>不吃的料理(最多5) - 完全排除</div><div style={{fontSize:11,color:"rgba(200,180,230,0.5)",marginBottom:12}}>設定後，選餐頁面將不會顯示這些類型</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>{av.map(t2=>{const a=dk.includes(t2.k);return (<button key={t2.k} onClick={()=>{if(a)sDk(p=>p.filter(x=>x!==t2.k));else if(dk.length<5){sDk(p=>[...p,t2.k]);sLk(p=>p.filter(x=>x!==t2.k));}}} style={{...crd,cursor:dk.length>=5&&!a?"not-allowed":"pointer",opacity:dk.length>=5&&!a?0.4:1,textAlign:"center",padding:12,border:a?"2px solid "+dg:"1px solid "+cb,background:a?"rgba(239,68,68,0.1)":cd}}><div style={{fontSize:14,fontWeight:700}}>{t2.l}</div></button>);})}</div></div>}
 {stb==="cal"&& <div><div style={{fontSize:13,color:ts,marginBottom:8}}>每日上限(kcal)</div><div style={{fontSize:11,color:"rgba(200,180,230,0.6)",marginBottom:8}}>建議範圍 1500-2500</div><input type="text" inputMode="numeric" pattern="[0-9]*" value={ct||""} onChange={e=>{const v=e.target.value.replace(/[^0-9]/g,"");if(v===""){sCt(0);}else{sCt(parseInt(v));}}} style={{width:"100%",background:"rgba(255,255,255,0.08)",border:"1px solid "+cb,borderRadius:10,padding:"10px 14px",color:tp,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",MozAppearance:"textfield",WebkitAppearance:"none"}}/></div>}
 <button onClick={()=>{setSaved(true);setTimeout(()=>setSaved(false),2000);}} style={{...bs(saved?gn:ac),width:"100%",marginTop:20,padding:14,fontSize:15,borderRadius:14}}>{saved?"已儲存!":"儲存設定"}</button>
 <div style={{...crd,marginTop:16}}>
