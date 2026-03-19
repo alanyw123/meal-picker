@@ -40,9 +40,9 @@ select{-webkit-appearance:none;appearance:none;background-image:url("data:image/
     appId: "1:382738223271:web:0a056e6d48476d749d4b82",
     measurementId: "G-8C59RM8B4Q"
   };
-  const firebaseApp = firebase.initializeApp(firebaseConfig);
-  const firebaseDb = firebase.firestore();
-  const firebaseAnalytics = firebase.analytics();
+  window.firebaseApp = firebase.initializeApp(firebaseConfig);
+  window.firebaseDb = firebase.firestore();
+  window.firebaseAnalytics = firebase.analytics();
 </script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -57,7 +57,7 @@ function getDeviceId(){
   return id;
 }
 const DEVICE_ID=getDeviceId();
-const fsDb=typeof firebaseDb!=="undefined"?firebaseDb:null;
+const fsDb=window.firebaseDb||null;
 
 // Firestore helpers
 function fsSaveHistory(hi){
