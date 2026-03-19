@@ -30,6 +30,7 @@ select{-webkit-appearance:none;appearance:none;background-image:url("data:image/
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script>
   const firebaseConfig = {
     apiKey: "AIzaSyB_qJj8fWWr6Des9-dQcGJNFyxHyxAkDKQ",
@@ -49,45 +50,30 @@ select{-webkit-appearance:none;appearance:none;background-image:url("data:image/
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="text/babel">
 const {useState,useEffect,useCallback,useMemo,useRef}=React;
+var _fromCloud=false; // guard to prevent save loop
 
-// Sync ID for cross-device cloud sync
-function getSyncId(){
-  let id=localStorage.getItem("mp_sync_id");
-  if(!id){
-    // Generate a short 6-char alphanumeric code
-    var chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    id="";
-    for(var i=0;i<6;i++)id+=chars[Math.floor(Math.random()*chars.length)];
-    localStorage.setItem("mp_sync_id",id);
-  }
-  return id;
-}
-const SYNC_ID=getSyncId();
 const fsDb=window.firebaseDb||null;
-
-function setSyncId(newId){
-  localStorage.setItem("mp_sync_id",newId);
-  window.location.reload();
-}
+const fsAuth=window.firebaseApp?firebase.auth():null;
+const googleProvider=fsAuth?new firebase.auth.GoogleAuthProvider():null;
 
 // Firestore helpers
 function fsSaveHistory(hi){
-  if(!fsDb)return;
-  try{fsDb.collection("users").doc(SYNC_ID).set({history:hi,updatedAt:new Date().toISOString()},{merge:true}).catch(function(e){console.log("fs save err",e);});}catch(e){console.log("fs err",e);}
+  if(!fsDb||!window._authUid)return;
+  try{fsDb.collection("users").doc(window._authUid).set({history:hi,updatedAt:new Date().toISOString()},{merge:true}).catch(function(e){console.log("fs save err",e);});}catch(e){console.log("fs err",e);}
 }
 function fsLoadHistory(callback){
   if(!fsDb){callback(null);return;}
-  fsDb.collection("users").doc(SYNC_ID).get().then(function(doc){
+  fsDb.collection("users").doc(authUser?authUser.uid:"anonymous").get().then(function(doc){
     if(doc.exists&&doc.data().history){callback(doc.data().history);}else{callback(null);}
   }).catch(function(e){console.log("fs load err",e);callback(null);});
 }
 function fsSaveSettings(data){
-  if(!fsDb)return;
-  try{fsDb.collection("users").doc(SYNC_ID).set({settings:data,updatedAt:new Date().toISOString()},{merge:true}).catch(function(e){console.log("fs save err",e);});}catch(e){console.log("fs err",e);}
+  if(!fsDb||!window._authUid)return;
+  try{fsDb.collection("users").doc(window._authUid).set({settings:data,updatedAt:new Date().toISOString()},{merge:true}).catch(function(e){console.log("fs save err",e);});}catch(e){console.log("fs err",e);}
 }
 function fsLoadSettings(callback){
   if(!fsDb){callback(null);return;}
-  fsDb.collection("users").doc(SYNC_ID).get().then(function(doc){
+  fsDb.collection("users").doc(authUser?authUser.uid:"anonymous").get().then(function(doc){
     if(doc.exists&&doc.data().settings){callback(doc.data().settings);}else{callback(null);}
   }).catch(function(e){console.log("fs load err",e);callback(null);});
 }
@@ -188,6 +174,8 @@ const [sortBy,setSortBy]=useState("default");
 const [origRs,setOrigRs]=useState([]);
 const [minRating,setMinRating]=useState(0);
 const [calMonth,setCalMonth]=useState(new Date(new Date().getFullYear(),new Date().getMonth(),1));
+const [authUser,setAuthUser]=useState(null);
+const [authLoading,setAuthLoading]=useState(true);
 const [selDate,setSelDate]=useState(null);
 
 const LS_KEYS={hi:"mp_hi",lk:"mp_lk",dk:"mp_dk",favS:"mp_favS",addS:"mp_addS",ct:"mp_ct",sl:"mp_sl"};
@@ -203,16 +191,19 @@ useEffect(()=>{
     const s=localStorage.getItem(LS_KEYS.sl);if(s)sSl(JSON.parse(s));
   }catch(e){console.log("load err",e)}
   // Real-time listener for cross-device sync
-  if(fsDb){
+  window._authUid=authUser?authUser.uid:null;
+  if(fsDb&&authUser){
     try{
-      fsDb.collection("users").doc(SYNC_ID).onSnapshot(function(doc){
+      fsDb.collection("users").doc(authUser.uid).onSnapshot(function(doc){
         if(doc.exists){
           var data=doc.data();
           if(data.history&&data.history.length>0){
+            _fromCloud=true;
             sHi(data.history);
             localStorage.setItem(LS_KEYS.hi,JSON.stringify(data.history));
           }
           if(data.settings){
+            _fromCloud=true;
             var s=data.settings;
             if(s.lk){sLk(s.lk);localStorage.setItem(LS_KEYS.lk,JSON.stringify(s.lk));}
             if(s.dk){sDk(s.dk);localStorage.setItem(LS_KEYS.dk,JSON.stringify(s.dk));}
@@ -224,13 +215,23 @@ useEffect(()=>{
     }catch(e){console.log("listener err",e);}
   }
 },[]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.hi,JSON.stringify(hi));fsSaveHistory(hi);}catch{}},[hi]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.lk,JSON.stringify(lk));fsSaveSettings({lk,dk,favS,ct});}catch{}},[lk]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.dk,JSON.stringify(dk));fsSaveSettings({lk,dk,favS,ct});}catch{}},[dk]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.favS,JSON.stringify(favS));fsSaveSettings({lk,dk,favS,ct});}catch{}},[favS]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.hi,JSON.stringify(hi));if(!_fromCloud){fsSaveHistory(hi);}else{_fromCloud=false;}}catch{}},[hi]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.lk,JSON.stringify(lk));if(!_fromCloud)fsSaveSettings({lk,dk,favS,ct});}catch{}},[lk]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.dk,JSON.stringify(dk));if(!_fromCloud)fsSaveSettings({lk,dk,favS,ct});}catch{}},[dk]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.favS,JSON.stringify(favS));if(!_fromCloud)fsSaveSettings({lk,dk,favS,ct});}catch{}},[favS]);
 useEffect(()=>{try{localStorage.setItem(LS_KEYS.addS,JSON.stringify(addS))}catch{}},[addS]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.ct,JSON.stringify(ct));fsSaveSettings({lk,dk,favS,ct});}catch{}},[ct]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.ct,JSON.stringify(ct));if(!_fromCloud)fsSaveSettings({lk,dk,favS,ct});}catch{}},[ct]);
 useEffect(()=>{try{localStorage.setItem(LS_KEYS.sl,JSON.stringify(sl))}catch{}},[sl]);
+
+// Auth listener
+useEffect(()=>{
+  if(!fsAuth){setAuthLoading(false);return;}
+  var unsub=fsAuth.onAuthStateChanged(function(user){
+    setAuthUser(user);
+    setAuthLoading(false);
+  });
+  return function(){unsub();};
+},[]);
 
 const td=new Date().toISOString().slice(0,10);
 const allDB=useMemo(()=>[...DB,...addS.map((s,i)=>({id:"user_"+i,n:s.name,t:s.type,la:0,lo:0,isUser:true,r:4.0,a:s.addr||"",p:"",pr:2,s:{solo:3,couple:3,friends:3,family:3,biz:3},c:500}))]  ,[addS,ul]);
@@ -381,8 +382,15 @@ const Confetti=()=>showCf? <div style={{position:"fixed",inset:0,pointerEvents:"
 const availableTypes=CT.filter(c=>!dk.includes(c.k));
 
 // === HOME ===
+if(authLoading) return (<Sh pg={pg} sp={sPg}><div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"60px 0"}}><div style={{textAlign:"center"}}><Logo s={64}/><div style={{fontSize:14,color:ts,marginTop:12}}>載入中...</div></div></div></Sh>);
+
 if(pg==="home") return (<Sh pg={pg} sp={sPg}>
-<div style={{display:"flex",alignItems:"center",gap:12,padding:"20px 0 8px"}}><Logo/><div><div style={{fontSize:20,fontWeight:900}}>吃貨小幫手</div><div style={{fontSize:11,color:ts}}>AI MEAL PICKER</div></div></div>
+<div style={{display:"flex",alignItems:"center",gap:12,padding:"20px 0 8px"}}><Logo/><div><div style={{fontSize:20,fontWeight:900}}>吃貨小幫手</div><div style={{fontSize:11,color:ts}}>AI MEAL PICKER</div></div>{authUser? <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6}}>{authUser.photoURL? <img src={authUser.photoURL} style={{width:24,height:24,borderRadius:"50%"}}/>:null}<span style={{fontSize:10,color:gn}}>已同步</span></div>:null}</div>
+
+{!authUser&& <div style={{...crd,marginTop:12,border:"1px solid "+ac,background:"rgba(139,92,246,0.05)",textAlign:"center",padding:16}}>
+<div style={{fontSize:13,fontWeight:600,color:ac,marginBottom:6}}>登入即可跨裝置同步</div>
+<button onClick={function(){if(fsAuth&&googleProvider){fsAuth.signInWithPopup(googleProvider).catch(function(e){});}}} style={{...bs(),fontSize:13,padding:"8px 20px"}}>Google 登入</button>
+</div>}
 
 <div style={{...crd,marginTop:12}}>
 <div style={{fontSize:12,color:ts,marginBottom:8}}>目前位置: <b style={{color:ul?"#e0d4f5":"#f59e0b"}}>{ul?ul.label:"尚未設定"}</b></div>
@@ -671,17 +679,25 @@ if(pg==="settings"){const av=CT.filter(c=>!lk.includes(c.k));return (<Sh pg={pg}
 {stb==="cal"&& <div><div style={{fontSize:13,color:ts,marginBottom:8}}>每日上限(kcal)</div><div style={{fontSize:11,color:"rgba(200,180,230,0.6)",marginBottom:8}}>建議範圍 1500-2500</div><input type="text" inputMode="numeric" pattern="[0-9]*" value={ct||""} onChange={e=>{const v=e.target.value.replace(/[^0-9]/g,"");if(v===""){sCt(0);}else{sCt(parseInt(v));}}} style={{width:"100%",background:"rgba(255,255,255,0.08)",border:"1px solid "+cb,borderRadius:10,padding:"10px 14px",color:tp,fontSize:16,fontWeight:700,outline:"none",boxSizing:"border-box",MozAppearance:"textfield",WebkitAppearance:"none"}}/></div>}
 <button onClick={()=>{setSaved(true);setTimeout(()=>setSaved(false),2000);}} style={{...bs(saved?gn:ac),width:"100%",marginTop:20,padding:14,fontSize:15,borderRadius:14}}>{saved?"已儲存!":"儲存設定"}</button>
 <div style={{...crd,marginTop:16}}>
-<div style={{fontSize:14,fontWeight:700,marginBottom:8}}>☁️ 跨裝置同步</div>
-<div style={{fontSize:12,color:ts,marginBottom:8}}>在其他裝置輸入同步碼，即可共享用餐紀錄和設定</div>
-<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-<div style={{fontSize:11,color:ts}}>你的同步碼：</div>
-<div style={{background:"rgba(139,92,246,0.2)",border:"1px solid "+ac,borderRadius:8,padding:"6px 14px",fontSize:18,fontWeight:900,letterSpacing:4,color:"#fff"}}>{SYNC_ID}</div>
+<div style={{fontSize:14,fontWeight:700,marginBottom:8}}>☁️ 帳號與同步</div>
+{authUser? <div>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+{authUser.photoURL? <img src={authUser.photoURL} style={{width:36,height:36,borderRadius:"50%"}}/>:null}
+<div>
+<div style={{fontSize:13,fontWeight:700}}>{authUser.displayName||"使用者"}</div>
+<div style={{fontSize:11,color:ts}}>{authUser.email}</div>
 </div>
-<div style={{fontSize:11,color:ts,marginBottom:6}}>在其他裝置上輸入此碼來同步：</div>
-<div style={{display:"flex",gap:8}}>
-<input id="syncInput" placeholder="輸入同步碼" maxLength={6} style={{flex:1,background:"rgba(255,255,255,0.08)",border:"1px solid "+cb,borderRadius:8,padding:"8px 12px",color:"#fff",fontSize:14,fontWeight:700,letterSpacing:2,outline:"none",textTransform:"uppercase",fontFamily:"'Noto Sans TC',sans-serif"}}/>
-<button onClick={function(){var v=document.getElementById("syncInput").value.trim().toUpperCase();if(v.length!==6){alert("請輸入6碼同步碼");return;}if(v===SYNC_ID){alert("這已經是你目前的同步碼");return;}if(confirm("確定要同步到 "+v+" 的資料？\n你目前的本地資料會被雲端資料覆蓋。")){setSyncId(v);}}} style={{...bs(),fontSize:13,padding:"8px 16px"}}>同步</button>
 </div>
+<div style={{fontSize:11,color:gn,marginBottom:10}}>✓ 已登入，資料自動跨裝置同步</div>
+<button onClick={function(){if(confirm("確定要登出？登出後此裝置的資料不會自動同步。")){fsAuth.signOut();}}} style={{...bs("rgba(239,68,68,0.2)"),width:"100%",fontSize:13,color:dg,border:"1px solid "+dg}}>登出</button>
+</div>
+: <div>
+<div style={{fontSize:12,color:ts,marginBottom:10}}>登入 Google 帳號即可跨裝置同步用餐紀錄和設定</div>
+<button onClick={function(){if(fsAuth&&googleProvider){fsAuth.signInWithPopup(googleProvider).catch(function(e){if(e.code!=="auth/popup-closed-by-user"){alert("登入失敗："+e.message);}});}}} style={{...bs(),width:"100%",fontSize:14,padding:"12px",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+<span style={{fontSize:18}}>G</span> 使用 Google 帳號登入
+</button>
+<div style={{fontSize:10,color:ts,marginTop:6,textAlign:"center"}}>登入後，任何裝置登入同一帳號即可同步</div>
+</div>}
 </div>
 </Sh>);}
 
