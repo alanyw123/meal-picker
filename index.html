@@ -50,7 +50,8 @@ select{-webkit-appearance:none;appearance:none;background-image:url("data:image/
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="text/babel">
 const {useState,useEffect,useCallback,useMemo,useRef}=React;
-var _fromCloud=false; // guard to prevent save loop
+var _fromCloud=false;
+var _cloudReady=false; // true after first snapshot received
 
 const fsDb=window.firebaseDb||null;
 const fsAuth=window.firebaseApp?firebase.auth():null;
@@ -175,6 +176,7 @@ const [origRs,setOrigRs]=useState([]);
 const [minRating,setMinRating]=useState(0);
 const [calMonth,setCalMonth]=useState(new Date(new Date().getFullYear(),new Date().getMonth(),1));
 const [authUser,setAuthUser]=useState(null);
+const fromCloud=useRef(false);
 const [authLoading,setAuthLoading]=useState(true);
 const [selDate,setSelDate]=useState(null);
 
@@ -195,32 +197,33 @@ useEffect(()=>{
   if(fsDb&&authUser){
     try{
       fsDb.collection("users").doc(authUser.uid).onSnapshot(function(doc){
+        _cloudReady=true;
         if(doc.exists){
           var data=doc.data();
-          if(data.history&&data.history.length>0){
-            _fromCloud=true;
+          _fromCloud=true;
+          if(data.history){
             sHi(data.history);
             localStorage.setItem(LS_KEYS.hi,JSON.stringify(data.history));
           }
           if(data.settings){
-            _fromCloud=true;
             var s=data.settings;
             if(s.lk){sLk(s.lk);localStorage.setItem(LS_KEYS.lk,JSON.stringify(s.lk));}
             if(s.dk){sDk(s.dk);localStorage.setItem(LS_KEYS.dk,JSON.stringify(s.dk));}
             if(s.favS){sFavS(s.favS);localStorage.setItem(LS_KEYS.favS,JSON.stringify(s.favS));}
             if(s.ct!=null){sCt(s.ct);localStorage.setItem(LS_KEYS.ct,JSON.stringify(s.ct));}
           }
+          setTimeout(function(){_fromCloud=false;},1000);
         }
       });
     }catch(e){console.log("listener err",e);}
   }
 },[]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.hi,JSON.stringify(hi));if(!_fromCloud){fsSaveHistory(hi);}else{_fromCloud=false;}}catch{}},[hi]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.lk,JSON.stringify(lk));if(!_fromCloud)fsSaveSettings({lk,dk,favS,ct});}catch{}},[lk]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.dk,JSON.stringify(dk));if(!_fromCloud)fsSaveSettings({lk,dk,favS,ct});}catch{}},[dk]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.favS,JSON.stringify(favS));if(!_fromCloud)fsSaveSettings({lk,dk,favS,ct});}catch{}},[favS]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.hi,JSON.stringify(hi));if(!_fromCloud&&_cloudReady){fsSaveHistory(hi);}else{_fromCloud=false;}}catch{}},[hi]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.lk,JSON.stringify(lk));if(!_fromCloud&&_cloudReady)fsSaveSettings({lk,dk,favS,ct});}catch{}},[lk]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.dk,JSON.stringify(dk));if(!_fromCloud&&_cloudReady)fsSaveSettings({lk,dk,favS,ct});}catch{}},[dk]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.favS,JSON.stringify(favS));if(!_fromCloud&&_cloudReady)fsSaveSettings({lk,dk,favS,ct});}catch{}},[favS]);
 useEffect(()=>{try{localStorage.setItem(LS_KEYS.addS,JSON.stringify(addS))}catch{}},[addS]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.ct,JSON.stringify(ct));if(!_fromCloud)fsSaveSettings({lk,dk,favS,ct});}catch{}},[ct]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.ct,JSON.stringify(ct));if(!_fromCloud&&_cloudReady)fsSaveSettings({lk,dk,favS,ct});}catch{}},[ct]);
 useEffect(()=>{try{localStorage.setItem(LS_KEYS.sl,JSON.stringify(sl))}catch{}},[sl]);
 
 // Auth listener
