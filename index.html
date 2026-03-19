@@ -50,32 +50,26 @@ select{-webkit-appearance:none;appearance:none;background-image:url("data:image/
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="text/babel">
 const {useState,useEffect,useCallback,useMemo,useRef}=React;
-var _skipNextSave=false;
 
 const fsDb=window.firebaseDb||null;
 const fsAuth=window.firebaseApp?firebase.auth():null;
 const googleProvider=fsAuth?new firebase.auth.GoogleAuthProvider():null;
 
-// Firestore helpers
+// Firestore helpers - debounced to reduce quota usage
+var _fsTimerH=null,_fsTimerS=null;
 function fsSaveHistory(hi){
   if(!fsDb||!window._authUid)return;
-  try{fsDb.collection("users").doc(window._authUid).set({history:JSON.parse(JSON.stringify(hi)),updatedAt:new Date().toISOString()},{merge:true}).catch(function(e){console.log("fs save err",e);});}catch(e){console.log("fs err",e);}
-}
-function fsLoadHistory(callback){
-  if(!fsDb){callback(null);return;}
-  fsDb.collection("users").doc(authUser?authUser.uid:"anonymous").get().then(function(doc){
-    if(doc.exists&&doc.data().history){callback(doc.data().history);}else{callback(null);}
-  }).catch(function(e){console.log("fs load err",e);callback(null);});
+  clearTimeout(_fsTimerH);
+  _fsTimerH=setTimeout(function(){
+    try{fsDb.collection("users").doc(window._authUid).set({history:JSON.parse(JSON.stringify(hi)),updatedAt:new Date().toISOString()},{merge:true}).catch(function(e){console.log("fs save err",e);});}catch(e){console.log("fs err",e);}
+  },800);
 }
 function fsSaveSettings(data){
   if(!fsDb||!window._authUid)return;
-  try{fsDb.collection("users").doc(window._authUid).set({settings:data,updatedAt:new Date().toISOString()},{merge:true}).catch(function(e){console.log("fs save err",e);});}catch(e){console.log("fs err",e);}
-}
-function fsLoadSettings(callback){
-  if(!fsDb){callback(null);return;}
-  fsDb.collection("users").doc(authUser?authUser.uid:"anonymous").get().then(function(doc){
-    if(doc.exists&&doc.data().settings){callback(doc.data().settings);}else{callback(null);}
-  }).catch(function(e){console.log("fs load err",e);callback(null);});
+  clearTimeout(_fsTimerS);
+  _fsTimerS=setTimeout(function(){
+    try{fsDb.collection("users").doc(window._authUid).set({settings:data,updatedAt:new Date().toISOString()},{merge:true}).catch(function(e){console.log("fs save err",e);});}catch(e){console.log("fs err",e);}
+  },800);
 }
 
 const CT=[{k:"taiwanese",l:"台式"},{k:"japanese",l:"日式"},{k:"korean",l:"韓式"},{k:"chinese",l:"中式"},{k:"italian",l:"義式"},{k:"american",l:"美式"},{k:"southeast_asian",l:"泰/東南亞"},{k:"fast_food",l:"速食/小吃"},{k:"hotpot",l:"火鍋"},{k:"bbq",l:"燒肉"},{k:"cafe",l:"咖啡廳"},{k:"vegetarian",l:"蔬食"},{k:"dessert",l:"甜點"},{k:"seafood",l:"海鮮"},{k:"indian",l:"印度/異國"}];
@@ -197,43 +191,56 @@ useEffect(()=>{
 useEffect(function(){
   window._authUid=authUser?authUser.uid:null;
   if(!fsDb||!authUser)return;
+  var isFirst=true;
   var unsub=fsDb.collection("users").doc(authUser.uid).onSnapshot(function(doc){
     if(doc.exists){
       var data=doc.data();
-      _skipNextSave=true;
+      // Block all useEffect write-backs while loading from cloud
+      fromCloud.current=true;
       if(data.history){
         sHi(data.history);
-        localStorage.setItem(LS_KEYS.hi,JSON.stringify(data.history));
+        try{localStorage.setItem(LS_KEYS.hi,JSON.stringify(data.history));}catch(e){}
       }
       if(data.settings){
         var s=data.settings;
-        if(s.lk){sLk(s.lk);localStorage.setItem(LS_KEYS.lk,JSON.stringify(s.lk));}
-        if(s.dk){sDk(s.dk);localStorage.setItem(LS_KEYS.dk,JSON.stringify(s.dk));}
-        if(s.favS){sFavS(s.favS);localStorage.setItem(LS_KEYS.favS,JSON.stringify(s.favS));}
-        if(s.ct!=null){sCt(s.ct);localStorage.setItem(LS_KEYS.ct,JSON.stringify(s.ct));}
+        if(s.lk){sLk(s.lk);try{localStorage.setItem(LS_KEYS.lk,JSON.stringify(s.lk));}catch(e){}}
+        if(s.dk){sDk(s.dk);try{localStorage.setItem(LS_KEYS.dk,JSON.stringify(s.dk));}catch(e){}}
+        if(s.favS){sFavS(s.favS);try{localStorage.setItem(LS_KEYS.favS,JSON.stringify(s.favS));}catch(e){}}
+        if(s.addS){sAddS(s.addS);try{localStorage.setItem(LS_KEYS.addS,JSON.stringify(s.addS));}catch(e){}}
+        if(s.sl){sSl(s.sl);try{localStorage.setItem(LS_KEYS.sl,JSON.stringify(s.sl));}catch(e){}}
+        if(s.ct!=null){sCt(s.ct);try{localStorage.setItem(LS_KEYS.ct,JSON.stringify(s.ct));}catch(e){}}
       }
-    } else {
-      // Cloud is empty for this user - upload current local data
+      // Unblock after React processes all state updates
+      setTimeout(function(){fromCloud.current=false;},100);
+    } else if(isFirst) {
+      // Cloud is empty for this user - upload current local data (only on first snapshot)
       var localHi=[];
       try{var h=localStorage.getItem("mp_hi");if(h)localHi=JSON.parse(h);}catch(e){}
       if(localHi.length>0)fsSaveHistory(localHi);
-      var localLk=[],localDk=[],localFavS=[],localCt=2000;
+      var localLk=[],localDk=[],localFavS=[],localAddS=[],localSl=[],localCt=2000;
       try{var l=localStorage.getItem("mp_lk");if(l)localLk=JSON.parse(l);}catch(e){}
       try{var d=localStorage.getItem("mp_dk");if(d)localDk=JSON.parse(d);}catch(e){}
       try{var f=localStorage.getItem("mp_favS");if(f)localFavS=JSON.parse(f);}catch(e){}
+      try{var a=localStorage.getItem("mp_addS");if(a)localAddS=JSON.parse(a);}catch(e){}
+      try{var sl2=localStorage.getItem("mp_sl");if(sl2)localSl=JSON.parse(sl2);}catch(e){}
       try{var c=localStorage.getItem("mp_ct");if(c)localCt=JSON.parse(c);}catch(e){}
-      fsSaveSettings({lk:localLk,dk:localDk,favS:localFavS,ct:localCt});
+      fsSaveSettings({lk:localLk,dk:localDk,favS:localFavS,addS:localAddS,sl:localSl,ct:localCt});
     }
+    isFirst=false;
   });
   return function(){unsub();};
 },[authUser]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.hi,JSON.stringify(hi));if(!_skipNextSave){fsSaveHistory(hi);}else{_skipNextSave=false;}}catch{}},[hi]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.lk,JSON.stringify(lk));if(!_skipNextSave)fsSaveSettings({lk,dk,favS,ct});}catch{}},[lk]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.dk,JSON.stringify(dk));if(!_skipNextSave)fsSaveSettings({lk,dk,favS,ct});}catch{}},[dk]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.favS,JSON.stringify(favS));if(!_skipNextSave)fsSaveSettings({lk,dk,favS,ct});}catch{}},[favS]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.addS,JSON.stringify(addS))}catch{}},[addS]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.ct,JSON.stringify(ct));if(!_skipNextSave)fsSaveSettings({lk,dk,favS,ct});}catch{}},[ct]);
-useEffect(()=>{try{localStorage.setItem(LS_KEYS.sl,JSON.stringify(sl))}catch{}},[sl]);
+
+// localStorage always updates instantly; Firestore only when NOT loading from cloud
+// history syncs separately (it can be large)
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.hi,JSON.stringify(hi));}catch{}if(!fromCloud.current)fsSaveHistory(hi);},[hi]);
+// all settings share ONE debounced write (800ms) — no matter how many change at once, only 1 Firestore write
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.lk,JSON.stringify(lk));}catch{}if(!fromCloud.current)fsSaveSettings({lk,dk,favS,addS,sl,ct});},[lk]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.dk,JSON.stringify(dk));}catch{}if(!fromCloud.current)fsSaveSettings({lk,dk,favS,addS,sl,ct});},[dk]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.favS,JSON.stringify(favS));}catch{}if(!fromCloud.current)fsSaveSettings({lk,dk,favS,addS,sl,ct});},[favS]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.addS,JSON.stringify(addS));}catch{}if(!fromCloud.current)fsSaveSettings({lk,dk,favS,addS,sl,ct});},[addS]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.ct,JSON.stringify(ct));}catch{}if(!fromCloud.current)fsSaveSettings({lk,dk,favS,addS,sl,ct});},[ct]);
+useEffect(()=>{try{localStorage.setItem(LS_KEYS.sl,JSON.stringify(sl));}catch{}if(!fromCloud.current)fsSaveSettings({lk,dk,favS,addS,sl,ct});},[sl]);
 
 // Auth listener
 useEffect(()=>{
