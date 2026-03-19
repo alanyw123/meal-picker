@@ -157,6 +157,7 @@ const [showCf,setShowCf]=useState(false);
 const [gpsL,setGpsL]=useState(false);
 const [nlN,setNlN]=useState("");
 const [nlA,setNlA]=useState("");
+const [geoLoading,setGeoLoading]=useState(false);
 const [showNb,setShowNb]=useState(false);
 const [saved,setSaved]=useState(false);
 const [shopTab,setShopTab]=useState("fav");
@@ -335,9 +336,36 @@ const isFav=id=>favS.some(f=>f.id===id);
 
 // FIXED: Google Maps URL - use official search API format for mobile compatibility
 const getMapUrl=(r)=>{
+  if(r.p)return "https://www.google.com/maps/place/?q=place_id:"+r.p;
   const name=encodeURIComponent(r.n);
   const addr=encodeURIComponent(r.a||"");
   return "https://www.google.com/maps/search/?api=1&query="+name+"+"+addr+"+台北";
+};
+
+// Geocoding helper - address to coordinates using OpenStreetMap Nominatim
+const geocodeAddress=async(addr)=>{
+  try{
+    // Strategy 1: structured query with city context
+    const clean=addr.replace(/[台臺]北市?/g,"").trim();
+    const q1="https://nominatim.openstreetmap.org/search?format=json&street="+encodeURIComponent(clean)+"&city="+encodeURIComponent("台北市")+"&country=Taiwan&limit=1";
+    const res1=await fetch(q1);
+    const data1=await res1.json();
+    if(data1&&data1.length>0)return {lat:parseFloat(data1[0].lat),lng:parseFloat(data1[0].lon)};
+    // Strategy 2: free-form with Taiwan context
+    const q2="https://nominatim.openstreetmap.org/search?format=json&q="+encodeURIComponent(addr+" 台北市 Taiwan")+"&limit=1";
+    const res2=await fetch(q2);
+    const data2=await res2.json();
+    if(data2&&data2.length>0)return {lat:parseFloat(data2[0].lat),lng:parseFloat(data2[0].lon)};
+    // Strategy 3: just the road name
+    const roadMatch=addr.match(/([^\d]+(?:路|街|大道|巷|弄))/);
+    if(roadMatch){
+      const q3="https://nominatim.openstreetmap.org/search?format=json&q="+encodeURIComponent(roadMatch[1]+" 台北市 Taiwan")+"&limit=1";
+      const res3=await fetch(q3);
+      const data3=await res3.json();
+      if(data3&&data3.length>0)return {lat:parseFloat(data3[0].lat),lng:parseFloat(data3[0].lon)};
+    }
+    return null;
+  }catch(e){console.log("geocode err",e);return null;}
 };
 
 // NEW: Share function
@@ -408,7 +436,7 @@ if(pg==="home") return (<Sh pg={pg} sp={sPg}>
 
 {!authUser&& <div style={{...crd,marginTop:12,border:"1px solid "+ac,background:"rgba(139,92,246,0.05)",textAlign:"center",padding:16}}>
 <div style={{fontSize:13,fontWeight:600,color:ac,marginBottom:6}}>登入即可跨裝置同步</div>
-<button onClick={function(){if(fsAuth&&googleProvider){fsAuth.signInWithPopup(googleProvider).catch(function(e){});}}} style={{...bs(),fontSize:13,padding:"8px 20px"}}>Google 登入</button>
+<button onClick={function(){try{var auth=firebase.auth();var provider=new firebase.auth.GoogleAuthProvider();auth.signInWithPopup(provider).catch(function(e){if(e.code==="auth/popup-blocked"||e.code==="auth/cancelled-popup-request"){auth.signInWithRedirect(provider);}else if(e.code!=="auth/popup-closed-by-user"){alert("登入失敗："+e.code+" "+e.message);}});}catch(e){alert("登入錯誤："+e.message);}}} style={{...bs(),fontSize:13,padding:"8px 20px"}}>Google 登入</button>
 </div>}
 
 <div style={{...crd,marginTop:12}}>
@@ -689,7 +717,7 @@ if(pg==="myshops") return (<Sh pg={pg} sp={sPg}>
 </Sh>);
 
 // === EDIT LOCATIONS ===
-if(pg==="editlocs") return (<Sh pg={pg} sp={sPg}><button onClick={()=>sPg("home")} style={{background:"none",border:"none",color:ts,fontSize:14,cursor:"pointer",fontFamily:"'Noto Sans TC',sans-serif",marginTop:16,marginBottom:12}}>← 返回</button><div style={{fontSize:20,fontWeight:900,marginBottom:8}}>管理常用地點</div><div style={{fontSize:12,color:ts,marginBottom:16}}>常用地點讓你快速切換位置，系統會用該位置計算餐廳距離</div>{sl.map((loc,i)=> <div key={i} style={{...crd,marginBottom:8,padding:12}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontWeight:600,fontSize:14}}>{loc.label}</div><div style={{fontSize:12,color:ts}}>{loc.addr}</div></div><button onClick={()=>sSl(prev=>prev.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:dg,fontSize:12,cursor:"pointer",fontFamily:"'Noto Sans TC',sans-serif"}}>刪除</button></div></div>)}<div style={{...crd,marginTop:12}}><div style={{fontSize:13,fontWeight:600,marginBottom:4}}>新增常用地點</div><div style={{fontSize:11,color:ts,marginBottom:8}}>輸入名稱和地址，座標會使用你目前選定的位置。建議先用GPS定位或選擇附近地點後再新增。</div><input value={nlN} onChange={e=>setNlN(e.target.value)} placeholder="名稱（如：健身房、學校）" style={{width:"100%",background:"rgba(255,255,255,0.08)",border:"1px solid "+cb,borderRadius:8,padding:"8px 12px",color:tp,fontSize:13,outline:"none",marginBottom:6,boxSizing:"border-box"}}/><input value={nlA} onChange={e=>setNlA(e.target.value)} placeholder="地址（如：忠孝東路四段100號）" style={{width:"100%",background:"rgba(255,255,255,0.08)",border:"1px solid "+cb,borderRadius:8,padding:"8px 12px",color:tp,fontSize:13,outline:"none",marginBottom:8,boxSizing:"border-box"}}/><button onClick={()=>{if(!nlN.trim()){alert("請填寫名稱");return;}sSl(prev=>[...prev,{label:nlN.trim(),addr:nlA||"",lat:ul?.lat||25.04,lng:ul?.lng||121.55}]);setNlN("");setNlA("");alert("已新增！");}} style={{...bs(),width:"100%",fontSize:13}}>新增常用地點</button></div></Sh>);
+if(pg==="editlocs") return (<Sh pg={pg} sp={sPg}><button onClick={()=>sPg("home")} style={{background:"none",border:"none",color:ts,fontSize:14,cursor:"pointer",fontFamily:"'Noto Sans TC',sans-serif",marginTop:16,marginBottom:12}}>← 返回</button><div style={{fontSize:20,fontWeight:900,marginBottom:8}}>管理常用地點</div><div style={{fontSize:12,color:ts,marginBottom:16}}>常用地點讓你快速切換位置，系統會用該位置計算餐廳距離</div>{sl.map((loc,i)=> <div key={i} style={{...crd,marginBottom:8,padding:12}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontWeight:600,fontSize:14}}>{loc.label}</div><div style={{fontSize:12,color:ts}}>{loc.addr}</div></div><button onClick={()=>sSl(prev=>prev.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:dg,fontSize:12,cursor:"pointer",fontFamily:"'Noto Sans TC',sans-serif"}}>刪除</button></div></div>)}<div style={{...crd,marginTop:12}}><div style={{fontSize:13,fontWeight:600,marginBottom:4}}>新增常用地點</div><div style={{fontSize:11,color:ts,marginBottom:8}}>輸入名稱和地址，系統會自動定位座標</div><input value={nlN} onChange={e=>setNlN(e.target.value)} placeholder="名稱（如：健身房、學校）" style={{width:"100%",background:"rgba(255,255,255,0.08)",border:"1px solid "+cb,borderRadius:8,padding:"8px 12px",color:tp,fontSize:13,outline:"none",marginBottom:6,boxSizing:"border-box"}}/><input value={nlA} onChange={e=>setNlA(e.target.value)} placeholder="地址（如：信義區松仁路100號）" style={{width:"100%",background:"rgba(255,255,255,0.08)",border:"1px solid "+cb,borderRadius:8,padding:"8px 12px",color:tp,fontSize:13,outline:"none",marginBottom:8,boxSizing:"border-box"}}/><button disabled={geoLoading} onClick={async()=>{if(!nlN.trim()){alert("請填寫名稱");return;}if(!nlA.trim()){alert("請填寫地址，系統需要地址來定位");return;}setGeoLoading(true);const coords=await geocodeAddress(nlA.trim());setGeoLoading(false);if(coords){sSl(prev=>[...prev,{label:nlN.trim(),addr:nlA.trim(),lat:coords.lat,lng:coords.lng}]);setNlN("");setNlA("");alert("已新增！座標已根據地址自動定位");}else{if(confirm("找不到此地址的座標，是否改用目前選定位置的座標？")){sSl(prev=>[...prev,{label:nlN.trim(),addr:nlA.trim(),lat:ul?.lat||25.04,lng:ul?.lng||121.55}]);setNlN("");setNlA("");}};}} style={{...bs(geoLoading?"rgba(139,92,246,0.4)":undefined),width:"100%",fontSize:13,opacity:geoLoading?0.7:1}}>{geoLoading?"🔍 定位中...":"新增常用地點"}</button></div></Sh>);
 
 // === SETTINGS ===
 if(pg==="settings"){const av=CT.filter(c=>!lk.includes(c.k));return (<Sh pg={pg} sp={sPg}><div style={{fontSize:20,fontWeight:900,marginTop:16,marginBottom:16}}>設定</div><div style={{display:"flex",background:"rgba(255,255,255,0.06)",borderRadius:12,padding:3,marginBottom:16}}>{["likes","dislikes","cal"].map(t=> <button key={t} onClick={()=>sStb(t)} style={{flex:1,padding:"8px 0",fontSize:13,fontWeight:stb===t?700:400,borderRadius:10,border:"none",background:stb===t?ac:"transparent",color:stb===t?"#fff":ts,cursor:"pointer",fontFamily:"'Noto Sans TC',sans-serif"}}>{{likes:"喜歡",dislikes:"不吃",cal:"熱量"}[t]}</button>)}</div>
@@ -712,7 +740,7 @@ if(pg==="settings"){const av=CT.filter(c=>!lk.includes(c.k));return (<Sh pg={pg}
 </div>
 : <div>
 <div style={{fontSize:12,color:ts,marginBottom:10}}>登入 Google 帳號即可跨裝置同步用餐紀錄和設定</div>
-<button onClick={function(){if(fsAuth&&googleProvider){fsAuth.signInWithPopup(googleProvider).catch(function(e){if(e.code!=="auth/popup-closed-by-user"){alert("登入失敗："+e.message);}});}}} style={{...bs(),width:"100%",fontSize:14,padding:"12px",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+<button onClick={function(){try{var auth=firebase.auth();var provider=new firebase.auth.GoogleAuthProvider();auth.signInWithPopup(provider).catch(function(e){if(e.code==="auth/popup-blocked"||e.code==="auth/cancelled-popup-request"){auth.signInWithRedirect(provider);}else if(e.code!=="auth/popup-closed-by-user"){alert("登入失敗："+e.code+" "+e.message);}});}catch(e){alert("登入錯誤："+e.message);}}} style={{...bs(),width:"100%",fontSize:14,padding:"12px",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
 <span style={{fontSize:18}}>G</span> 使用 Google 帳號登入
 </button>
 <div style={{fontSize:10,color:ts,marginTop:6,textAlign:"center"}}>登入後，任何裝置登入同一帳號即可同步</div>
