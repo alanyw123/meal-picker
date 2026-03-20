@@ -231,22 +231,22 @@ useEffect(()=>{
   // Load from localStorage first (instant)
   try{
     const h=localStorage.getItem(LS_KEYS.hi);if(h)sHi(JSON.parse(h));
-    const l=localStorage.getItem(LS_KEYS.lk);if(l)sLk(JSON.parse(l));
-    const d=localStorage.getItem(LS_KEYS.dk);if(d)sDk(JSON.parse(d));
+    const l=localStorage.getItem(LS_KEYS.lk);
+    const d=localStorage.getItem(LS_KEYS.dk);
+    let parsedLk=l?JSON.parse(l):[];
+    let parsedDk=d?JSON.parse(d):[];
+    // Auto-fix: ensure likes and dislikes never overlap (likes win)
+    if(parsedLk.length>0&&parsedDk.length>0){
+      parsedDk=parsedDk.filter(x=>!parsedLk.includes(x));
+      try{localStorage.setItem(LS_KEYS.dk,JSON.stringify(parsedDk));}catch(e){}
+    }
+    sLk(parsedLk);
+    sDk(parsedDk);
     const f=localStorage.getItem(LS_KEYS.favS);if(f)sFavS(JSON.parse(f));
     const a=localStorage.getItem(LS_KEYS.addS);if(a)sAddS(JSON.parse(a));
     const c2=localStorage.getItem(LS_KEYS.ct);if(c2)sCt(JSON.parse(c2));
     const s=localStorage.getItem(LS_KEYS.sl);if(s)sSl(JSON.parse(s));
   }catch(e){console.log("load err",e)}
-  // Auto-fix: remove any overlap between likes and dislikes (likes win)
-  try{
-    const l2=JSON.parse(localStorage.getItem(LS_KEYS.lk)||"[]");
-    const d2=JSON.parse(localStorage.getItem(LS_KEYS.dk)||"[]");
-    if(l2.length>0&&d2.length>0){
-      const cleaned=d2.filter(x=>!l2.includes(x));
-      if(cleaned.length!==d2.length){sDk(cleaned);try{localStorage.setItem(LS_KEYS.dk,JSON.stringify(cleaned));}catch(e){}}
-    }
-  }catch(e){}
 },[]);
 
 // Real-time Firestore listener - runs when authUser changes
@@ -400,10 +400,9 @@ const isFav=id=>favS.some(f=>f.id===id);
 
 // FIXED: Google Maps URL - use official search API format for mobile compatibility
 const getMapUrl=(r)=>{
-  if(r.p)return "https://www.google.com/maps/place/?q=place_id:"+r.p;
   const name=encodeURIComponent(r.n);
   const addr=encodeURIComponent(r.a||"");
-  return "https://www.google.com/maps/search/?api=1&query="+name+"+"+addr+"+台北";
+  return "https://www.google.com/maps/search/?api=1&query="+name+"+"+addr;
 };
 
 // Geocoding helper - address to coordinates using OpenStreetMap Nominatim
@@ -541,7 +540,7 @@ if(pg==="scene") return (<Sh pg={pg} sp={sPg}><button onClick={()=>sPg("home")} 
 // === TYPES === FIXED: hide disliked types, highlight liked types
 if(pg==="types") return (<Sh pg={pg} sp={sPg}><button onClick={()=>sPg("scene")} style={{background:"none",border:"none",color:ts,fontSize:14,cursor:"pointer",fontFamily:"'Noto Sans TC',sans-serif",marginTop:16,marginBottom:12}}>← 返回</button><div style={{fontSize:20,fontWeight:900,marginBottom:6}}>想吃什麼?</div><div style={{fontSize:12,color:ts,marginBottom:8}}>點選想吃的類型（可不選=全部）{lk.length>0?" | ⭐ 為你偏好的料理":""}{dk.length>0?" | 已排除"+dk.length+"種不吃的料理":""}</div>
 <div style={{fontSize:10,color:"rgba(200,180,230,0.4)",marginBottom:8}}>共{availableTypes.length}種可選</div>
-<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>{availableTypes.map(t=>{const a=st.includes(t.k);const isLiked=lk.includes(t.k);return (<button key={t.k} onClick={()=>sSt(prev=>prev.includes(t.k)?prev.filter(x=>x!==t.k):[...prev,t.k])} style={{...crd,cursor:"pointer",textAlign:"center",padding:"14px 8px",border:a?"2px solid "+ac:isLiked?"1px solid "+pk:"1px solid "+cb,background:a?"rgba(139,92,246,0.15)":isLiked?"rgba(236,72,153,0.06)":cd}}><div style={{fontSize:14,fontWeight:700}}>{t.l}</div>{isLiked&&!a&& <div style={{fontSize:9,color:pk,marginTop:2}}>⭐ 偏好</div>}</button>);})}</div><button onClick={()=>sPg("budget")} style={{...bs(),width:"100%",marginTop:20,padding:14,fontSize:16,borderRadius:14,background:"linear-gradient(135deg,"+ac+","+pk+")"}}>下一步</button></Sh>);
+<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>{availableTypes.map(t=>{const a=st.includes(t.k);const isLiked=lk.includes(t.k);return (<button key={t.k} onClick={()=>sSt(prev=>prev.includes(t.k)?prev.filter(x=>x!==t.k):[...prev,t.k])} style={{...crd,cursor:"pointer",textAlign:"center",padding:"14px 8px",border:a?"2px solid "+ac:"1px solid "+cb,background:a?"rgba(139,92,246,0.15)":cd}}><div style={{fontSize:14,fontWeight:700}}>{t.l}</div>{isLiked&&!a&& <div style={{fontSize:9,color:pk,marginTop:2}}>⭐ 偏好</div>}</button>);})}</div><button onClick={()=>sPg("budget")} style={{...bs(),width:"100%",marginTop:20,padding:14,fontSize:16,borderRadius:14,background:"linear-gradient(135deg,"+ac+","+pk+")"}}>下一步</button></Sh>);
 
 // === BUDGET ===
 if(pg==="budget") return (<Sh pg={pg} sp={sPg}><button onClick={()=>sPg("types")} style={{background:"none",border:"none",color:ts,fontSize:14,cursor:"pointer",fontFamily:"'Noto Sans TC',sans-serif",marginTop:16,marginBottom:12}}>← 返回</button><div style={{fontSize:20,fontWeight:900,marginBottom:8}}>預算多少?</div><div style={{fontSize:12,color:ts,marginBottom:16}}>每人平均消費</div><div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>{BU.map(b=> <button key={b.k} onClick={()=>sSb(sb===b.k?null:b.k)} style={{...crd,cursor:"pointer",padding:16,textAlign:"center",border:sb===b.k?"2px solid "+ac:"1px solid "+cb,background:sb===b.k?"rgba(139,92,246,0.15)":cd}}><div style={{fontSize:16,fontWeight:900}}>{b.l}</div></button>)}<button onClick={()=>sSb(sb===0?null:0)} style={{...crd,cursor:"pointer",padding:16,textAlign:"center",border:sb===null||sb===0?"2px solid "+ac:"1px solid "+cb,background:sb===null||sb===0?"rgba(139,92,246,0.15)":cd,gridColumn:"1/-1"}}><div style={{fontSize:16,fontWeight:900}}>不限預算</div></button></div><div style={{fontSize:12,color:ts,marginTop:16,marginBottom:8}}>搜尋距離</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>{[{k:1,l:"1km"},{k:3,l:"3km"},{k:5,l:"5km"},{k:8,l:"8km"},{k:0,l:"不限"}].map(d=> <button key={d.k} onClick={()=>setMaxDist(maxDist===d.k?3:d.k)} style={{...crd,cursor:"pointer",padding:12,textAlign:"center",border:maxDist===d.k?"2px solid "+pk:"1px solid "+cb,background:maxDist===d.k?"rgba(236,72,153,0.12)":cd}}><div style={{fontSize:14,fontWeight:700}}>{d.l}</div></button>)}</div><div style={{fontSize:12,color:ts,marginTop:16,marginBottom:8}}>最低評分</div>
